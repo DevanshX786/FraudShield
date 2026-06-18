@@ -1,0 +1,103 @@
+project:
+  name: fraudshield
+  random_state: 42
+
+paths:
+  raw_data_dir: data/raw
+  processed_data_dir: data/processed
+  inference_batch_dir: data/inference_batches
+  reports_dir: reports
+  logs_dir: logs
+  models_dir: models
+
+data:
+  train_transaction_file: train_transaction.csv
+  train_identity_file: train_identity.csv
+  test_transaction_file: test_transaction.csv
+  test_identity_file: test_identity.csv
+  target_column: isFraud
+  join_key: TransactionID
+  required_train_transaction_columns:
+    - TransactionID
+    - isFraud
+    - TransactionDT
+    - TransactionAmt
+    - ProductCD
+    - card1
+    - card2
+    - card3
+    - card4
+    - card5
+    - card6
+  required_test_transaction_columns:
+    - TransactionID
+    - TransactionDT
+    - TransactionAmt
+    - ProductCD
+    - card1
+    - card2
+    - card3
+    - card4
+    - card5
+    - card6
+
+features:
+  user_key_columns:
+    - card1
+    - card2
+    - card3
+    - card5
+    - addr1
+  merchant_key_columns:
+    - ProductCD
+    - card4
+    - P_emaildomain
+  categorical_columns:
+    - ProductCD
+    - card4
+    - card6
+    - P_emaildomain
+    - R_emaildomain
+    - DeviceType
+  rolling_windows:
+    user_days: 30
+    merchant_days: 30
+    velocity_hours: 1
+
+split:
+  train_size: 0.70
+  validation_size: 0.15
+  test_size: 0.15
+  stratify: true
+
+model:
+  name: fraudshield-xgboost
+  threshold_search:
+    min: 0.30
+    max: 0.70
+    step: 0.05
+  xgboost:
+    objective: binary:logistic
+    eval_metric: aucpr
+    max_depth: 6
+    learning_rate: 0.05
+    n_estimators: 300
+    subsample: 0.8
+    colsample_bytree: 0.8
+
+drift_simulation:
+  base_intensity: 0.1
+  current_intensity: 0.1
+  intensity_increment: 0.2
+  max_intensity: 1.0
+  drift_threshold: 0.05
+
+retraining:
+  min_hours_between_retrains: 6
+  max_retrains_per_day: 3
+  promotion_min_f1_delta: 0.01
+
+api:
+  fraud_threshold: 0.5
+  suspicious_threshold: 0.3
+  recent_transactions_limit: 100

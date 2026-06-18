@@ -18,14 +18,20 @@ env/
 !.env.example
 
 # Data and generated artifacts
-data/raw/
-data/processed/
-data/inference_batches/
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/inference_batches/*
+!data/inference_batches/.gitkeep
 ieee-fraud-detection/
-models/
+models/*
+!models/.gitkeep
 mlruns/
-reports/
-logs/
+reports/*
+!reports/.gitkeep
+logs/*
+!logs/.gitkeep
 
 # Frontend
 node_modules/

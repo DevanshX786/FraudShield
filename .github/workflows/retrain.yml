@@ -1,0 +1,13 @@
+name: Retrain
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Placeholder
+        run: echo "Scheduled retraining workflow will be implemented in Phase 5."

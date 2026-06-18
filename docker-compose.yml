@@ -1,0 +1,75 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fraudshield-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fraudshield}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fraudshield}
+      POSTGRES_DB: ${POSTGRES_DB:-fraudshield}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fraudshield} -d ${POSTGRES_DB:-fraudshield}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.17.2
+    container_name: fraudshield-mlflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./models/mlflow:/mlflow/artifacts
+    command:
+      - mlflow
+      - server
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
+      - --backend-store-uri
+      - postgresql://${POSTGRES_USER:-fraudshield}:${POSTGRES_PASSWORD:-fraudshield}@postgres:5432/${POSTGRES_DB:-fraudshield}
+      - --default-artifact-root
+      - /mlflow/artifacts
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: fraudshield-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+    env_file:
+      - .env
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./reports:/app/reports
+      - ./logs:/app/logs
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: fraudshield-grafana
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+
+volumes:
+  postgres_data:
+  grafana_data:
