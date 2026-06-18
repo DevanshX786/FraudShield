@@ -1,0 +1,690 @@
+FraudShield Work Log
+====================
+
+This file explains, in simple language, what work has been done so far and what each part means.
+
+
+1. Project idea
+---------------
+
+FraudShield is a machine learning and MLOps project for detecting credit card fraud.
+
+The project uses the IEEE-CIS Fraud Detection dataset from Kaggle. The final goal is to build a full production-style pipeline:
+
+- load and validate fraud data
+- create useful features
+- train an XGBoost fraud detection model
+- track model experiments with MLflow
+- explain predictions with SHAP
+- serve predictions with FastAPI
+- store logs in PostgreSQL
+- simulate data drift
+- detect drift
+- retrain the model when needed
+- show metrics in a React dashboard and Grafana
+- run checks with GitHub Actions
+
+
+2. Dataset checked
+------------------
+
+The downloaded dataset was checked locally.
+
+Current dataset folder:
+
+    ieee-fraud-detection/
+
+Files found:
+
+    sample_submission.csv
+    test_identity.csv
+    test_transaction.csv
+    train_identity.csv
+    train_transaction.csv
+
+Dataset sizes:
+
+    train_transaction.csv: 590,540 rows and 394 columns
+    train_identity.csv: 144,233 rows and 41 columns
+    test_transaction.csv: 506,691 rows and 393 columns
+    test_identity.csv: 141,907 rows and 41 columns
+    sample_submission.csv: 506,691 rows and 2 columns
+
+Training fraud rate:
+
+    fraud_rate = number_of_fraud_rows / total_training_rows
+    fraud_rate = mean(isFraud)
+    fraud_rate is about 3.5%
+
+This matches the project plan.
+
+
+3. Important dataset decision
+-----------------------------
+
+The original README talked like the dataset had clean columns such as:
+
+    user_id
+    merchant_id
+    amount
+    card_type
+
+But the real IEEE-CIS dataset does not directly have those clean business columns.
+
+The real dataset has columns like:
+
+    TransactionID
+    isFraud
+    TransactionDT
+    TransactionAmt
+    ProductCD
+    card1, card2, card3, card4, card5, card6
+    addr1, addr2
+    P_emaildomain, R_emaildomain
+    C*, D*, M*, V*
+    id_*
+    DeviceType
+    DeviceInfo
+
+So the README was changed to explain that we will create production-style features from the real dataset columns.
+
+
+4. Feature mapping plan
+-----------------------
+
+These are the planned mappings from raw IEEE-CIS columns to easier project features.
+
+Transaction amount:
+
+    amount = TransactionAmt
+
+Transaction time:
+
+    TransactionDT is a relative time value in seconds.
+
+    day_number = floor(TransactionDT / 86400)
+    hour = floor((TransactionDT % 86400) / 3600)
+    day_of_week = day_number % 7
+    is_weekend = day_of_week in [5, 6]
+
+Card features:
+
+    card_network = card4
+    card_type = card6
+
+User proxy:
+
+    user_key = combination of card and address columns
+    user_key = card1 + card2 + card3 + card5 + addr1
+
+This is not a real user ID. It is an approximate identity created from stable card/address signals.
+
+Merchant/category proxy:
+
+    merchant_key = combination of product and transaction pattern columns
+    merchant_key = ProductCD + card4 + P_emaildomain
+
+This is not a real merchant ID. It is a useful proxy because the dataset does not expose actual merchant IDs.
+
+
+5. Planned feature formulas
+---------------------------
+
+Fraud rate:
+
+    fraud_rate = fraud_count / total_count
+    fraud_rate = mean(isFraud)
+
+User transaction count over 30 days:
+
+    user_tx_count_30d =
+        count of previous transactions for the same user_key
+        where transaction_time is within the last 30 days
+
+User average amount over 30 days:
+
+    user_avg_amount_30d =
+        average TransactionAmt for the same user_key
+        where transaction_time is within the last 30 days
+
+User total amount over 30 days:
+
+    user_total_amount_30d =
+        sum of TransactionAmt for the same user_key
+        where transaction_time is within the last 30 days
+
+Merchant transaction count over 30 days:
+
+    merchant_tx_count_30d =
+        count of previous transactions for the same merchant_key
+        where transaction_time is within the last 30 days
+
+Merchant unique users over 30 days:
+
+    merchant_unique_users_30d =
+        number of unique user_key values for the same merchant_key
+        where transaction_time is within the last 30 days
+
+Velocity feature:
+
+    velocity_1hr =
+        count of previous transactions for the same user_key
+        where transaction_time is within the last 1 hour
+
+Important rule:
+
+    Rolling features must be point-in-time safe.
+    This means a row can only use transactions that happened before it.
+    It must not use future transactions.
+
+
+6. Model and metric formulas
+----------------------------
+
+Confusion matrix terms:
+
+    TP = true positives
+    TN = true negatives
+    FP = false positives
+    FN = false negatives
+
+Precision:
+
+    precision = TP / (TP + FP)
+
+Meaning:
+
+    Out of all transactions predicted as fraud, how many were actually fraud?
+
+Recall:
+
+    recall = TP / (TP + FN)
+
+Meaning:
+
+    Out of all real fraud transactions, how many did the model catch?
+
+F1 score:
+
+    F1 = 2 * precision * recall / (precision + recall)
+
+Meaning:
+
+    A balanced score between precision and recall.
+
+ROC-AUC:
+
+    Measures how well the model separates fraud and non-fraud across thresholds.
+
+Prediction threshold:
+
+    if fraud_probability >= threshold:
+        prediction = FRAUD
+    else:
+        prediction = CLEAN
+
+Planned threshold search:
+
+    start = 0.30
+    end = 0.70
+    step = 0.05
+
+The model will test thresholds like:
+
+    0.30, 0.35, 0.40, ..., 0.70
+
+Then it will choose the threshold that gives the best validation F1 score.
+
+
+7. Drift simulation formulas
+----------------------------
+
+Because the Kaggle dataset is static, we need simulated drift.
+
+Drift means:
+
+    New incoming data starts looking different from the training data.
+
+Configured drift values:
+
+    base_intensity = 0.1
+    current_intensity = 0.1
+    intensity_increment = 0.2
+    max_intensity = 1.0
+    drift_threshold = 0.05
+
+Intensity update:
+
+    next_intensity = min(current_intensity + intensity_increment, max_intensity)
+
+Example:
+
+    Week 1: 0.1
+    Week 2: 0.3
+    Week 3: 0.5
+    Week 4: 0.7
+    Week 5: 0.9
+    Week 6: 1.0
+
+Amount drift:
+
+    drifted_amount = TransactionAmt * (1 + 0.60 * drift_intensity)
+
+Examples:
+
+    intensity = 0.1 means amount increases by about 6%
+    intensity = 0.5 means amount increases by about 30%
+    intensity = 1.0 means amount increases by about 60%
+
+Velocity drift:
+
+    drifted_velocity_1hr = velocity_1hr * (1 + 2.0 * drift_intensity)
+
+Examples:
+
+    intensity = 0.1 means velocity increases by about 20%
+    intensity = 0.5 means velocity increases by about 100%
+    intensity = 1.0 means velocity increases by about 200%
+
+Fraud rate drift:
+
+    target_fraud_rate moves from about 3.5% toward about 7% to 8%
+
+One possible formula:
+
+    target_fraud_rate = base_fraud_rate + drift_intensity * (max_fraud_rate - base_fraud_rate)
+
+Example:
+
+    base_fraud_rate = 0.035
+    max_fraud_rate = 0.08
+    intensity = 0.5
+
+    target_fraud_rate = 0.035 + 0.5 * (0.08 - 0.035)
+    target_fraud_rate = 0.0575
+    target_fraud_rate = 5.75%
+
+Drift detection rule:
+
+    if p_value < drift_threshold:
+        drift_detected = true
+    else:
+        drift_detected = false
+
+Current threshold:
+
+    drift_threshold = 0.05
+
+
+8. Retraining formulas and rules
+--------------------------------
+
+Promotion rule:
+
+    improvement = new_f1 - old_f1
+
+    if improvement > promotion_min_f1_delta:
+        promote new model
+    else:
+        keep current model
+
+Current value:
+
+    promotion_min_f1_delta = 0.01
+
+This means the new model must improve F1 by more than 1 percentage point.
+
+Retraining safety rules:
+
+    minimum time between retrains = 6 hours
+    maximum retrains per day = 3
+
+These rules prevent the system from retraining too often.
+
+
+9. Git and README work done
+---------------------------
+
+A Git repository was initialized in:
+
+    D:\Projects\FraudShield
+
+The README was rewritten to:
+
+- remove broken encoding
+- describe the real IEEE-CIS dataset
+- explain that some features are derived/proxy features
+- remove fake final model scores
+- explain the architecture clearly
+- list the planned project structure
+- show the intended API endpoints
+- show the intended database schema
+- explain the local setup steps
+
+The GitHub remote is:
+
+    https://github.com/DevanshX786/FraudShield.git
+
+The local branch is:
+
+    main
+
+The repo currently has one local commit ahead of GitHub:
+
+    4e515ef Scaffold Phase 1 project setup
+
+This commit has NOT been pushed yet during this note.
+
+
+10. Phase 1 work done
+---------------------
+
+Phase 1 is project setup.
+
+The following files and folders were created:
+
+    .env.example
+    .flake8
+    .github/workflows/ci.yml
+    .github/workflows/deploy.yml
+    .github/workflows/retrain.yml
+    .gitignore
+    Makefile
+    config/config.yaml
+    docker-compose.yml
+    docker/Dockerfile.api
+    docker/Dockerfile.dashboard
+    pyproject.toml
+    requirements.txt
+    src/
+    scripts/
+    tests/
+    dashboard/
+    data/
+    models/
+    reports/
+    logs/
+    notebooks/
+
+
+11. What each new setup file does
+---------------------------------
+
+.env.example:
+
+    Template for local environment variables.
+    Includes API port, PostgreSQL settings, MLflow settings, and model settings.
+
+.gitignore:
+
+    Prevents large or generated files from being committed.
+    Important ignored items:
+
+        ieee-fraud-detection/
+        data/raw/*
+        data/processed/*
+        data/inference_batches/*
+        models/*
+        reports/*
+        logs/*
+        __pycache__/
+        .venv/
+        node_modules/
+
+config/config.yaml:
+
+    Central project configuration.
+    Stores paths, required columns, feature settings, model settings, drift settings, and API thresholds.
+
+requirements.txt:
+
+    Python dependencies for the backend and ML pipeline.
+
+Makefile:
+
+    Shortcut commands for setup, Docker, training, testing, formatting, and API startup.
+
+docker-compose.yml:
+
+    Defines the local stack:
+
+        PostgreSQL
+        MLflow
+        FastAPI API
+        Grafana
+
+docker/Dockerfile.api:
+
+    Builds the FastAPI backend container.
+
+docker/Dockerfile.dashboard:
+
+    Builds the React dashboard container.
+
+.github/workflows/ci.yml:
+
+    GitHub Actions workflow for linting and testing.
+
+.github/workflows/deploy.yml:
+
+    Placeholder deployment workflow for Phase 9.
+
+.github/workflows/retrain.yml:
+
+    Placeholder scheduled retraining workflow for a later phase.
+
+pyproject.toml:
+
+    Stores Black formatting config and pytest config.
+
+.flake8:
+
+    Stores linting config.
+
+
+12. Backend scaffold created
+----------------------------
+
+Python package created:
+
+    src/
+
+Files created:
+
+    src/__init__.py
+    src/api/__init__.py
+    src/api/main.py
+    src/data_ingestion.py
+    src/feature_engineering.py
+    src/data_preprocessing.py
+    src/model_training.py
+    src/model_evaluation.py
+    src/drift_simulator.py
+    src/drift_detector.py
+    src/retraining_pipeline.py
+
+Current FastAPI health endpoint:
+
+    GET /health
+
+Expected response:
+
+    {"status": "ok"}
+
+Most files are placeholders right now.
+They exist so the project structure is ready for the next phases.
+
+
+13. Script scaffold created
+---------------------------
+
+Scripts created:
+
+    scripts/train.py
+    scripts/evaluate.py
+    scripts/check_drift.py
+    scripts/generate_inference_batch.py
+    scripts/clean_artifacts.py
+
+These scripts currently raise NotImplementedError.
+That is intentional because Phase 1 is only setup.
+The real logic starts in Phase 2.
+
+
+14. Test scaffold created
+-------------------------
+
+Test files created:
+
+    tests/test_api.py
+    tests/test_data_ingestion.py
+    tests/test_feature_engineering.py
+    tests/test_model_training.py
+    tests/test_drift_simulator.py
+    tests/test_drift_detector.py
+
+Current real test:
+
+    tests/test_api.py checks that GET /health returns {"status": "ok"}.
+
+
+15. Dashboard scaffold created
+------------------------------
+
+Dashboard files created:
+
+    dashboard/package.json
+    dashboard/index.html
+    dashboard/src/main.jsx
+    dashboard/src/App.jsx
+    dashboard/src/components/TransactionFeed.jsx
+    dashboard/src/components/ModelMetrics.jsx
+    dashboard/src/components/DriftMonitor.jsx
+    dashboard/src/components/ShapExplainer.jsx
+
+The dashboard is only a starter shell right now.
+The real UI will be built in a later phase.
+
+
+16. Verification done
+---------------------
+
+A Python syntax check was run:
+
+    python -m compileall src scripts tests
+
+Result:
+
+    Passed.
+
+Pytest was not run successfully because the bundled Python environment did not have pytest installed yet.
+That will work after the project virtual environment is created and requirements are installed.
+
+
+17. What is still pending in Phase 1
+------------------------------------
+
+The code scaffold is done.
+
+Still useful to do:
+
+    install project dependencies in a local virtual environment
+    run pytest
+    run lint
+    start Docker Desktop
+    test docker compose
+    push the Phase 1 commit when ready
+
+
+18. Tools you should install locally
+------------------------------------
+
+You are already installing:
+
+    Docker Desktop
+
+Also install/check:
+
+    Git
+        Needed for commits, pushes, branches, and GitHub.
+
+    Python 3.11
+        Needed for the ML pipeline and FastAPI backend.
+        Make sure "Add Python to PATH" is enabled during install if using the official installer.
+
+    Node.js 18 or newer
+        Needed for the React dashboard.
+        Node.js 20 LTS is also fine.
+
+    Kaggle CLI
+        Needed to download the IEEE-CIS dataset from Kaggle.
+        Installed with:
+            pip install kaggle
+
+    Kaggle API token
+        Needed by the Kaggle CLI.
+        Download kaggle.json from Kaggle account settings.
+
+    Make
+        Optional but useful because the project has a Makefile.
+        On Windows, you can use Git Bash, Chocolatey, Scoop, or install make another way.
+        If make is not installed, you can still run the underlying commands manually.
+
+    Antigravity IDE
+        Already opened by you. Good for reviewing project files.
+
+Optional but useful:
+
+    GitHub CLI
+        Command name: gh
+        Useful for GitHub auth, repo commands, and workflow checks.
+
+    DBeaver or pgAdmin
+        Useful for looking inside PostgreSQL tables later.
+
+    Postman or Insomnia
+        Useful for testing FastAPI endpoints later.
+
+
+19. After Docker Desktop installs
+---------------------------------
+
+Open Docker Desktop and wait until it says Docker is running.
+
+Then check:
+
+    docker --version
+    docker compose version
+
+Later, after dependencies and files are ready, the local stack will start with:
+
+    docker compose up --build
+
+or:
+
+    make up
+
+
+20. Next phase
+--------------
+
+The next real coding phase is Phase 2:
+
+    Data Ingestion + Validation
+
+In Phase 2 we will implement:
+
+    src/data_ingestion.py
+
+It will:
+
+    load IEEE-CIS CSV files
+    check required columns
+    validate data types
+    check missing values
+    check duplicate TransactionID values
+    join transaction and identity data
+    output a clean summary
+    add tests for all of this
+
+This is the right next step before feature engineering or model training.
