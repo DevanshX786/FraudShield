@@ -1,0 +1,248 @@
+Phase 1 — Project Setup (1-2 days)
+What you build:
+
+Full folder structure matching the README exactly
+requirements.txt — all dependencies pinned
+.env.example — DB URL, MLflow URI, ports
+config/config.yaml — all thresholds, hyperparams, drift intensity settings
+docker-compose.yml — FastAPI + PostgreSQL + MLflow + Grafana
+Makefile — all commands from README
+README.md — already done
+
+GitHub Actions: ci.yml — lint + test on every push
+
+Phase 2 — Data Ingestion + Validation (2-3 days)
+What you build:
+
+src/data_ingestion.py
+
+Load IEEE-CIS CSVs
+Validate schema — required columns present
+Validate dtypes — amount is float, transaction_id is string
+Check nulls — drop rows with null transaction_id, impute amount with median
+Check duplicates — drop duplicate transaction_ids
+Log summary — row count, null count, duplicate count, fraud rate
+
+
+tests/test_data_ingestion.py — test all validations
+notebooks/01_eda.ipynb — class distribution, missing values, feature correlations, fraud patterns
+
+What you learn: Writing defensive data pipelines, data quality thinking
+
+Phase 3 — Feature Engineering (3-4 days)
+What you build:
+
+src/feature_engineering.py
+
+Temporal features — hour, day_of_week, is_weekend, month
+User aggregates (30 day window) — user_tx_count_30d, user_avg_amount_30d, user_total_amount_30d
+Merchant aggregates (30 day window) — merchant_tx_count_30d, merchant_unique_users_30d
+Velocity feature — velocity_1hr (transactions by same user in last 1hr)
+One-hot encode categoricals — card_type
+Store all features to PostgreSQL features table
+
+
+src/data_preprocessing.py
+
+Stratified train/val/test split (70/15/15)
+SMOTE on training set only — never on val/test
+Save splits to data/processed/
+Save feature list to data/processed/feature_list.json
+
+
+tests/test_feature_engineering.py
+notebooks/02_feature_engineering.ipynb
+
+What you learn: Point-in-time feature engineering, why SMOTE only on train
+
+Phase 4 — Model Training + MLflow + SHAP (3-4 days)
+What you build:
+
+src/model_training.py
+
+XGBoost training with scale_pos_weight for class imbalance
+Hyperparameter tuning — max_depth, learning_rate, n_estimators, subsample
+MLflow autolog — params, metrics, feature importance, model artifact
+Register best model in MLflow Model Registry
+Tag best model as Production
+Save model metadata to PostgreSQL model_registry table
+
+
+src/model_evaluation.py
+
+Precision, Recall, F1, ROC-AUC on test set
+Confusion matrix
+Threshold tuning — test 0.3 to 0.7, pick optimal F1
+SHAP global feature importance — top 10 features
+SHAP per-prediction values — stored as JSON for API responses
+Save evaluation report to reports/evaluation_report.json
+
+
+tests/test_model_training.py
+notebooks/03_model_experiments.ipynb
+
+What you learn: MLflow experiment tracking, SHAP explainability, threshold tuning for imbalanced data
+
+Phase 2.5 — Drift Simulation Engine (1-2 days)
+
+Sits between Phase 4 and Phase 5 in execution order but documented separately since it's a standalone concept.
+
+What you build:
+
+src/drift_simulator.py
+
+simulate_drift(df, drift_intensity) function
+Shifts amount distribution upward by drift_intensity * 60%
+Shifts fraud rate from 3.5% toward 7-8%
+Increases velocity_1hr by drift_intensity * 2x
+Shifts hour distribution of fraud transactions toward daytime
+Introduces new merchant_tx_count patterns
+Fully parameterized — intensity from config.yaml
+
+
+scripts/generate_inference_batch.py
+
+Reads drift_intensity from config/config.yaml
+Takes test set, applies simulate_drift()
+Saves output to data/inference_batches/batch_YYYYMMDD.csv
+After successful retraining — increments drift_intensity in config, then resets to base after retrain
+
+
+tests/test_drift_simulator.py
+
+Test that shifted distributions are statistically different from original
+Test intensity scaling
+Test config read/write
+
+
+
+What you learn: Statistical distribution shifting, parameterized simulation design
+
+Phase 5 — Drift Detection + Auto Retrain (3-4 days)
+What you build:
+
+src/drift_detector.py
+
+Load latest inference batch from data/inference_batches/
+Load training data baseline
+Evidently DataDriftPreset report
+KS test on numeric features — amount, velocity_1hr, user_avg_amount_30d
+Chi-square on categoricals — card_type, hour_bucket
+Flag drift if any feature p-value < 0.05 (threshold from config)
+Save HTML report to reports/
+Log all scores + p-values to PostgreSQL drift_logs table
+
+
+src/retraining_pipeline.py
+
+Calls ingestion → feature engineering → training → evaluation in sequence
+Loads current Production model F1 from PostgreSQL
+Compares new model F1 vs current
+If new F1 > old F1 by >1% — promote new model to Production in MLflow registry
+Else — keep current model, log warning
+Safety checks:
+
+File lock — prevent simultaneous retraining
+Minimum 6hr gap between retrains
+Max 3 retrains per day — log alert if exceeded
+
+
+Log full event to logs/retraining_history.json + PostgreSQL retrain_logs
+
+
+tests/test_drift_detector.py
+
+GitHub Actions: retrain.yml — daily cron, calls generate_inference_batch.py then drift_detector.py, triggers retraining_pipeline.py if drift detected
+What you learn: Statistical drift tests, Evidently reports, safe retraining orchestration
+
+Phase 6 — FastAPI Backend (2-3 days)
+What you build:
+
+src/api/main.py — FastAPI app
+All endpoints from README:
+
+POST /predict — fetch features from PostgreSQL, load Production model from MLflow, run inference, compute SHAP, log prediction, return response
+GET /metrics — current model F1, AUC, Precision, Recall from DB
+GET /drift — latest drift report JSON
+GET /drift/history — all drift runs from DB
+POST /retrain — manually trigger retraining_pipeline.py
+GET /model/info — version, F1, training date, promotion history
+GET /transactions/recent — last 100 predictions from DB
+GET /grafana-metrics — JSON time-series for Grafana JSON API plugin
+GET /health — DB connection, model loaded, API status
+
+
+PostgreSQL integration — SQLAlchemy models for all 4 tables
+tests/test_api.py — test all endpoints with pytest + httpx
+
+What you learn: Production API design, SQLAlchemy ORM, connecting MLflow to FastAPI at inference time
+
+Phase 7 — Grafana Monitoring (2-3 days)
+What you build:
+
+Grafana Cloud free tier setup
+JSON API plugin configured to pull from /grafana-metrics
+Dashboard panels:
+
+Live fraud rate gauge (rolling 24hr)
+Transaction volume over time — Recharts line chart
+Model F1 score across retraining runs
+Per-feature drift score heatmap
+Drift intensity over time — shows simulation progression week over week
+Retraining history event timeline
+API response latency distribution
+
+
+Export dashboard JSON to config/grafana_dashboard.json — importable by anyone cloning the repo
+
+What you learn: Grafana dashboard design, JSON API data source, time-series visualization
+
+Phase 8 — React Frontend (4-5 days)
+What you build:
+
+dashboard/src/components/TransactionFeed.jsx
+
+Simulated transaction stream — new transaction every 3 seconds
+Calls /predict for each
+Fraud badge — 🔴 FRAUD / 🟡 SUSPICIOUS / 🟢 CLEAN based on probability
+SHAP bar chart per transaction on click
+
+
+dashboard/src/components/ModelMetrics.jsx
+
+Recharts line charts — F1, AUC, Precision, Recall over retraining runs
+Pulls from /metrics
+
+
+dashboard/src/components/DriftMonitor.jsx
+
+Per-feature drift score heatmap
+Alert banner when drift detected
+Drift intensity progression chart
+Pulls from /drift/history
+
+
+dashboard/src/components/ShapExplainer.jsx
+
+Horizontal bar chart — positive contributions red, negative blue
+Updates per selected transaction
+
+
+Embedded Grafana iframe for system metrics panel
+Dark mode, Tailwind design, fully responsive
+
+What you learn: React state management for real-time data, polling APIs, Recharts, Tailwind dark mode
+
+Phase 9 — Deployment + CI/CD (2-3 days)
+What you build:
+
+docker/Dockerfile.api — FastAPI container
+docker/Dockerfile.dashboard — React build + serve
+docker-compose.yml — full local stack
+Render deployment — FastAPI + PostgreSQL + MLflow
+Vercel deployment — React dashboard
+Grafana Cloud — import dashboard JSON
+.github/workflows/deploy.yml — auto deploy on merge to main
+Update all live URLs in README
+
+What you learn: Docker multi-stage builds, Render + Vercel deployment, environment variable management across platforms
