@@ -139,7 +139,9 @@ def _validate_required_columns(
     missing_columns = sorted(set(required_columns) - set(dataframe.columns))
     if missing_columns:
         missing = ", ".join(missing_columns)
-        raise DataValidationError(f"{source_path} is missing required columns: {missing}")
+        raise DataValidationError(
+            f"{source_path} is missing required columns: {missing}"
+        )
 
 
 def _validate_transaction_types(

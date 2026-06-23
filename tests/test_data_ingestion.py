@@ -125,7 +125,10 @@ def test_load_train_dataset_cleans_and_joins_identity(tmp_path: Path) -> None:
 
     assert len(dataframe) == 2
     assert list(dataframe["TransactionID"]) == [1.0, 2.0]
-    assert dataframe.loc[dataframe["TransactionID"] == 2.0, "TransactionAmt"].item() == 10.0
+    assert (
+        dataframe.loc[dataframe["TransactionID"] == 2.0, "TransactionAmt"].item()
+        == 10.0
+    )
     assert "DeviceType" in dataframe.columns
     assert summary.transaction_rows_raw == 4
     assert summary.identity_rows_raw == 2
@@ -140,7 +143,9 @@ def test_load_test_dataset_does_not_require_target(tmp_path: Path) -> None:
     raw_dir.mkdir()
     config = _base_config(raw_dir)
 
-    _write_csv(raw_dir / "test_transaction.csv", _transaction_rows(include_target=False))
+    _write_csv(
+        raw_dir / "test_transaction.csv", _transaction_rows(include_target=False)
+    )
 
     dataframe, summary = load_ieee_cis_dataset("test", config=config)
 

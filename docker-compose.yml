@@ -50,6 +50,9 @@ services:
         condition: service_started
     env_file:
       - .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-fraudshield}:${POSTGRES_PASSWORD:-fraudshield}@postgres:5432/${POSTGRES_DB:-fraudshield}
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
@@ -66,9 +69,12 @@ services:
       - "${GRAFANA_PORT:-3001}:3000"
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning
+      - ./config/grafana_dashboard.json:/etc/grafana/provisioning/dashboards/grafana_dashboard.json
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: "marcusolsson-json-datasource"
 
 volumes:
   postgres_data:

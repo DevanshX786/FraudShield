@@ -69,6 +69,11 @@ split:
   validation_size: 0.15
   test_size: 0.15
   stratify: true
+  # SMOTE oversampling: 0.3 means minority grows to 30% of majority class.
+  # Full 1.0 (50/50) requires ~1.75 GB RAM on the full dataset.
+  # XGBoost scale_pos_weight already handles the remaining imbalance.
+  use_smote: true
+  smote_sampling_strategy: 0.3
 
 model:
   name: fraudshield-xgboost

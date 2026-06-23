@@ -3,11 +3,34 @@ name: Retrain
 on:
   workflow_dispatch:
   schedule:
+    # Runs daily at midnight UTC
     - cron: "0 0 * * *"
 
 jobs:
   retrain:
     runs-on: ubuntu-latest
+
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+      MODEL_NAME: fraudshield-xgboost
+
     steps:
-      - name: Placeholder
-        run: echo "Scheduled retraining workflow will be implemented in Phase 5."
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Generate drifted inference batch
+        run: python scripts/generate_inference_batch.py
+
+      - name: Run drift detection and conditional retraining
+        run: python scripts/check_drift.py

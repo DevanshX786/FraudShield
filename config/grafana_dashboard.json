@@ -1,0 +1,402 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "title": "Live Fraud Rate",
+      "type": "gauge",
+      "datasource": {
+        "type": "marcusolsson-json-datasource",
+        "uid": "fraudshield-api-datasource"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "fraudshield-api-datasource"
+          },
+          "method": "GET",
+          "urlPath": "/grafana-metrics",
+          "fields": [
+            {
+              "name": "fraud_rate",
+              "jsonPath": "$[?(@.target=='fraud_rate')].datapoints[*][0]",
+              "type": "number"
+            },
+            {
+              "name": "time",
+              "jsonPath": "$[?(@.target=='fraud_rate')].datapoints[*][1]",
+              "type": "time"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.04
+              },
+              {
+                "color": "red",
+                "value": 0.06
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "text": {}
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "id": 2,
+      "title": "Transaction Volume (Last 100)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "marcusolsson-json-datasource",
+        "uid": "fraudshield-api-datasource"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "fraudshield-api-datasource"
+          },
+          "method": "GET",
+          "urlPath": "/grafana-metrics",
+          "fields": [
+            {
+              "name": "total_predictions",
+              "jsonPath": "$[?(@.target=='total_predictions')].datapoints[*][0]",
+              "type": "number"
+            },
+            {
+              "name": "time",
+              "jsonPath": "$[?(@.target=='total_predictions')].datapoints[*][1]",
+              "type": "time"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth"
+          },
+          "unit": "none"
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "id": 3,
+      "title": "API Average Latency",
+      "type": "timeseries",
+      "datasource": {
+        "type": "marcusolsson-json-datasource",
+        "uid": "fraudshield-api-datasource"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "fraudshield-api-datasource"
+          },
+          "method": "GET",
+          "urlPath": "/grafana-metrics",
+          "fields": [
+            {
+              "name": "avg_latency_ms",
+              "jsonPath": "$[?(@.target=='avg_latency_ms')].datapoints[*][0]",
+              "type": "number"
+            },
+            {
+              "name": "time",
+              "jsonPath": "$[?(@.target=='avg_latency_ms')].datapoints[*][1]",
+              "type": "time"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear"
+          },
+          "unit": "ms"
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "id": 4,
+      "title": "Model Performance (F1 Score history)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "marcusolsson-json-datasource",
+        "uid": "fraudshield-api-datasource"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "fraudshield-api-datasource"
+          },
+          "method": "GET",
+          "urlPath": "/model/info",
+          "fields": [
+            {
+              "name": "F1 Score",
+              "jsonPath": "$.promotion_history[*].new_f1",
+              "type": "number"
+            },
+            {
+              "name": "time",
+              "jsonPath": "$.promotion_history[*].triggered_at",
+              "type": "time"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "pointSize": 6,
+            "showPoints": "always"
+          },
+          "unit": "percentunit"
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "id": 5,
+      "title": "Drift Intensity Progression",
+      "type": "timeseries",
+      "datasource": {
+        "type": "marcusolsson-json-datasource",
+        "uid": "fraudshield-api-datasource"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "fraudshield-api-datasource"
+          },
+          "method": "GET",
+          "urlPath": "/drift/history",
+          "fields": [
+            {
+              "name": "Drift Intensity",
+              "jsonPath": "$.[*].drift_intensity",
+              "type": "number"
+            },
+            {
+              "name": "time",
+              "jsonPath": "$.[*].run_date",
+              "type": "time"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter"
+          },
+          "unit": "none"
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "id": 6,
+      "title": "Feature Drift Metrics Heatmap",
+      "type": "table",
+      "datasource": {
+        "type": "marcusolsson-json-datasource",
+        "uid": "fraudshield-api-datasource"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "fraudshield-api-datasource"
+          },
+          "method": "GET",
+          "urlPath": "/drift/history",
+          "fields": [
+            {
+              "name": "Run Date",
+              "jsonPath": "$.[*].run_date",
+              "type": "string"
+            },
+            {
+              "name": "Feature Name",
+              "jsonPath": "$.[*].feature_name",
+              "type": "string"
+            },
+            {
+              "name": "Drift Score",
+              "jsonPath": "$.[*].drift_score",
+              "type": "number"
+            },
+            {
+              "name": "p-value",
+              "jsonPath": "$.[*].p_value",
+              "type": "number"
+            },
+            {
+              "name": "Drift Detected",
+              "jsonPath": "$.[*].drift_detected",
+              "type": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "id": 7,
+      "title": "Model Retraining & Promotion Log",
+      "type": "table",
+      "datasource": {
+        "type": "marcusolsson-json-datasource",
+        "uid": "fraudshield-api-datasource"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "fraudshield-api-datasource"
+          },
+          "method": "GET",
+          "urlPath": "/model/info",
+          "fields": [
+            {
+              "name": "Triggered At",
+              "jsonPath": "$.promotion_history[*].triggered_at",
+              "type": "string"
+            },
+            {
+              "name": "Reason",
+              "jsonPath": "$.promotion_history[*].trigger_reason",
+              "type": "string"
+            },
+            {
+              "name": "Old F1",
+              "jsonPath": "$.promotion_history[*].old_f1",
+              "type": "number"
+            },
+            {
+              "name": "New F1",
+              "jsonPath": "$.promotion_history[*].new_f1",
+              "type": "number"
+            },
+            {
+              "name": "Promoted?",
+              "jsonPath": "$.promotion_history[*].promoted",
+              "type": "string"
+            },
+            {
+              "name": "Notes",
+              "jsonPath": "$.promotion_history[*].notes",
+              "type": "string"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": [
+    "fraudshield",
+    "mlops"
+  ],
+  "timezone": "browser",
+  "title": "FraudShield Monitoring",
+  "uid": "fraudshield-monitoring",
+  "version": 1,
+  "weekStart": ""
+}

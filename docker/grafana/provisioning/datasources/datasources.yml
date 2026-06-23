@@ -1,0 +1,13 @@
+apiVersion: 1
+
+datasources:
+  - name: FraudShield API
+    uid: fraudshield-api-datasource
+    type: marcusolsson-json-datasource
+    access: proxy
+    url: http://api:8000
+    isDefault: true
+    jsonData:
+      keepCookies: []
+    secureJsonData: {}
+    editable: true

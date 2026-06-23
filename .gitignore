@@ -34,6 +34,8 @@ logs/*
 !logs/.gitkeep
 
 # Frontend
+
+# Frontend
 node_modules/
 dashboard/node_modules/
 dashboard/dist/
@@ -44,3 +46,4 @@ dashboard/build/
 Thumbs.db
 .vscode/
 .idea/
+*.db

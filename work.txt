@@ -697,12 +697,300 @@ Implemented Ingestion Logic and Formulas:
     fraud_rate = count(isFraud == 1) / total_transaction_rows
 
 
-21. Next phase
---------------
+21. Phase 3 Progress: Feature Engineering & Preprocessing
+--------------------------------------------------------
 
-The next phase is Phase 3: Feature Engineering.
+Feature Engineering and Preprocessing is 100% complete. All planned components (temporal features, user aggregates, merchant aggregates, velocity counters, stratified splits, StandardScaler, SimpleImputer, and SMOTE) are implemented and verified.
 
-In Phase 3 we will implement:
-- src/feature_engineering.py to engineer temporal features (hour, day of week, weekend indicator), user/merchant aggregates (30-day window transaction counts, average amounts, unique users), and velocity features (transaction count in the last 1 hour).
-- src/data_preprocessing.py to handle stratified train/val/test splits and SMOTE oversampling.
-- tests/test_feature_engineering.py to test the engineered features and splits.
+Completed Work:
+1. Developed the feature engineering module in src/feature_engineering.py with O(N) optimized rolling windows.
+2. Developed the preprocessing module in src/data_preprocessing.py with OneHotEncoder, SimpleImputer, StandardScaler, and SMOTE.
+3. Created a complete test suite in tests/test_feature_engineering.py.
+4. Verified that all feature engineering and preprocessing tests pass successfully.
+
+22. Phase 4 Progress: Model Training, MLflow & SHAP
+---------------------------------------------------
+
+Model Training and Evaluation is 100% complete. This phase trains an XGBoost classifier with dynamic scale_pos_weight, performs hyperparameter grid tuning across three distinct model architectures, tracks experiments via MLflow, tunes decision thresholds, computes global and local SHAP feature explanations, and registers the production model.
+
+Completed Work:
+1. Developed the model training module in src/model_training.py.
+2. Developed the evaluation and threshold tuning module in src/model_evaluation.py.
+3. Created runner scripts: scripts/train.py and scripts/evaluate.py.
+4. Created a comprehensive test suite in tests/test_model_training.py.
+5. Verified all tests and code lint checks pass successfully.
+
+Implemented Logic and Formulas:
+* Class Imbalance Weighting:
+  scale_pos_weight = count(non_fraud_train) / count(fraud_train)
+* Hyperparameter Search Space:
+  Candidate 1: max_depth=4, learning_rate=0.05, n_estimators=100, subsample=0.8
+  Candidate 2: max_depth=6, learning_rate=0.05, n_estimators=300, subsample=0.8
+  Candidate 3: max_depth=6, learning_rate=0.10, n_estimators=200, subsample=1.0
+* Classification Threshold Tuning:
+  Thresholds searched: [0.30, 0.35, 0.40, ..., 0.70] on validation split.
+  Formula: Best threshold maximizes F1 = 2 * (precision * recall) / (precision + recall)
+* SHAP Global Feature Importance:
+  mean_abs_shap = mean(abs(shap_values), axis=0) per feature
+* Database Logging with JSON Fallback:
+  Logs model metadata (f1, auc, precision, recall, threshold, version, run_id) to PostgreSQL model_registry table (or models/model_registry_metadata.json if DB is offline).
+
+
+23. Phase 2.5 Progress: Drift Simulation Engine
+-----------------------------------------------
+
+Drift Simulation is 100% complete. Implemented a controlled simulation engine that shifts features and labels to recreate realistic fraud drift patterns.
+
+Completed Work:
+1. Developed the drift simulation engine in src/drift_simulator.py.
+2. Built a batch generation CLI tool in scripts/generate_inference_batch.py.
+3. Created a complete test suite in tests/test_drift_simulator.py.
+4. Verified that simulated shifts are statistically observable under test conditions.
+
+Implemented Logic and Formulas:
+* Transaction Amount Drift:
+  amount_drifted = TransactionAmt * (1.0 + 0.60 * drift_intensity)
+* Velocity Drift:
+  velocity_drifted = velocity_1hr * (1.0 + 2.0 * drift_intensity)
+* Target Fraud Rate Drift:
+  target_fraud_rate = base_fraud_rate + drift_intensity * (max_fraud_rate - base_fraud_rate)
+  where base_fraud_rate = 0.035, max_fraud_rate = 0.080.
+  Flip clean records (isFraud == 0) to fraud (isFraud == 1) with probability:
+  p_flip = (target_fraud_rate - curr_fraud_rate) / (1.0 - curr_fraud_rate)
+* Hour Peak Daytime Shift:
+  With probability = drift_intensity, fraud transaction hour is shifted toward daytime peak (9:00 to 17:00, centered at 12:00 via a normal distribution).
+* Merchant Transaction Count Spike:
+  With probability = 0.30 * drift_intensity, ProductCD, card4, and P_emaildomain are set to dominant values (W, visa, gmail.com) to spike rolling merchant volume.
+
+
+24. Phase 5 Progress: Drift Detection & Automated Retraining
+------------------------------------------------------------
+
+Drift Detection and Auto-Retraining is 100% complete. Implemented statistical drift checks, Evidently HTML reporting, concurrency locks, rate limits, F1 promotion guards, and auto-retraining workflows.
+
+Completed Work:
+1. Developed the drift detection module in src/drift_detector.py.
+2. Developed the retraining orchestrator in src/retraining_pipeline.py.
+3. Built CLI tools scripts/check_drift.py and integrated retraining pipeline triggers.
+4. Created a complete test suite in tests/test_drift_detector.py.
+5. Verified all statistical tests, concurrency locks, and fallback logging pass successfully.
+
+Implemented Logic and Formulas:
+* Numerical Feature Drift:
+  Uses the Kolmogorov-Smirnov (KS) test comparing baseline and batch distributions of amount, velocity_1hr, and user_avg_amount_30d.
+* Categorical Feature Drift:
+  Uses the Chi-Square test of independence on card_type and hour_bucket (bucketed as night [0-6], morning [7-12], afternoon [13-18], evening [19-23]).
+* Concurrency Guard:
+  Exclusive file creation lock models/retrain.lock prevents parallel retraining runs.
+* Retraining Rate Limits:
+  - Hourly gap limit: >= 6 hours since last successful retrain.
+  - Daily frequency limit: < 3 retrains in the last 24 hours.
+* Performance-Based Promotion:
+  new_model_f1 - production_model_f1 >= promotion_min_f1_delta (delta = 0.01)
+  On successful promotion, current_intensity in config.yaml is reset to base_intensity.
+* Logging & Fallbacks:
+  Logs drift events to PostgreSQL drift_logs (fallback: logs/drift_logs.json).
+  Logs retraining results to PostgreSQL retrain_logs (fallback: logs/retraining_history.json).
+
+
+25. Phase 6 Progress: FastAPI Backend Serving & Database ORM
+-------------------------------------------------------------
+
+FastAPI Serving & Database ORM is 100% complete. Implemented point-in-time rolling feature calculations during inference, database logging, local JSON fallbacks for offline stability, SHAP tree explanations, and automated integration tests.
+
+Completed Work:
+1. Developed the database connection and session helpers in src/api/database.py.
+2. Developed the SQLAlchemy ORM models (features, predictions, drift_logs, retrain_logs) in src/api/models.py.
+3. Implemented serving logic and FastAPI endpoints in src/api/main.py.
+4. Created a comprehensive integration test suite in tests/test_api.py (19 tests).
+5. Verified that all 34 tests in the repository pass successfully.
+6. Confirmed 100% PEP8 compliance via flake8 lint checks.
+
+Implemented Logic and Formulas:
+* Real-time point-in-time user aggregates:
+  Calculates user_tx_count_30d, user_avg_amount_30d, and velocity_1hr dynamically by fetching user transaction history within the 30-day and 1-hour window prior to the current transaction timestamp, appending the current transaction, and computing metrics instantly.
+* Health Check Endpoint:
+  Checks API connection, database connection, and model loading status.
+  status = "ok" if MODEL is loaded else "degraded"
+* Prediction Response Classifications:
+  - CLEAN: if probability < suspicious_threshold (0.3)
+  - SUSPICIOUS: if suspicious_threshold <= probability < fraud_threshold (0.5)
+  - FRAUD: if probability >= fraud_threshold (0.5)
+* SHAP Float Serialization:
+  Values from tree explanations are converted to standard python float types to prevent JSON serialization errors before sending responses.
+* Graceful Fallbacks:
+  If PostgreSQL is unreachable, the system writes FeatureRecord, PredictionRecord, DriftLogRecord, and RetrainLogRecord data to local JSON cache files (logs/features.json, logs/predictions.json, logs/drift_logs.json, logs/retraining_history.json, models/model_registry_metadata.json).
+
+26. Phase 6.5 Progress: Codebase Audit, Verification, and Cleanup
+------------------------------------------------------------------
+
+Completed a comprehensive codebase audit, refactoring, and workspace cleanup to ensure 100% production readiness:
+
+1. Optimized Preprocessing:
+   - Replaced loop-based column assignment in `data_preprocessing.py` with a fast pandas `reindex` alignment:
+     X_final = X_scaled.reindex(columns=feature_list, fill_value=0.0)
+   - Resolves the pandas `PerformanceWarning` regarding highly fragmented dataframes and speeds up inference preprocessing.
+
+2. Removed Deprecation Warnings:
+   - Migrated from FastAPI's deprecated `@app.on_event("startup")` initialization block to the recommended `lifespan` context manager in `main.py`.
+   - Replaced deprecated `get_latest_versions` calls with `search_model_versions` in `main.py` and `retraining_pipeline.py` to clear MLflow registry stages deprecation warnings.
+
+3. Configuration & Scripts:
+   - Updated `.gitignore` to exclude all SQLite `*.db` files (such as `test_api.db`).
+   - Implemented a robust `clean_artifacts.py` script that removes Pytest/Python cache directories, temporary lock files, generated evaluation reports, local JSON logs, and SQLite database files.
+
+4. Style & Testing Verification:
+   - Ran `black` code formatter on the entire repository.
+   - Verified that `flake8` and `black --check` pass with 0 warnings/errors.
+   - Re-ran the pytest suite, verifying that all 34 tests pass cleanly.
+
+
+27. Phase 7 Progress: Grafana Monitoring
+-----------------------------------------
+
+Grafana Monitoring is 100% complete. Configured the local Docker Grafana stack to auto-provision the JSON API datasource and automatically load the operational, model, and statistical drift dashboard panels.
+
+Completed Work:
+1. Developed HTTP request latency tracking middleware in `src/api/main.py` using a rolling buffer.
+2. Updated the `/grafana-metrics` endpoint to calculate and expose the `avg_latency_ms` time-series target.
+3. Updated `docker-compose.yml` to automatically install the `marcusolsson-json-datasource` plugin and map configuration folders.
+4. Created `docker/grafana/provisioning/datasources/datasources.yml` to auto-provision the "FraudShield API" datasource pointing to `http://api:8000`.
+5. Created `docker/grafana/provisioning/dashboards/dashboards.yml` to scan and load dashboards automatically.
+6. Designed and exported a comprehensive dashboard to `config/grafana_dashboard.json` with 7 pre-configured panels.
+7. Verified API integration test coverage in `tests/test_api.py` and ran the full 34-test validation suite cleanly.
+
+Implemented Logic and Formulas:
+* Request Latency Tracking:
+  Stores durations of API requests (excluding health and metrics) in-memory.
+  Formula: avg_latency = sum(LATENCY_HISTORY) / len(LATENCY_HISTORY)
+* Exposed Targets:
+  - fraud_rate (rolling fraud proportion)
+  - total_predictions (recent transaction volume)
+  - drift_detected (binary flag: 1 if drift present, 0 if clean)
+  - avg_latency_ms (rolling API average response time)
+* Provisioned Panels:
+  - Live Fraud Rate (Gauge)
+  - Transaction Volume (Time-series)
+  - API Average Latency (Time-series)
+  - Model Performance / F1 Score history (Time-series)
+  - Drift Intensity Progression (Time-series)
+  - Feature Drift Metrics Heatmap (Table)
+  - Model Retraining & Promotion Log (Table)
+
+
+28. Next Phase: React Frontend Dashboard
+-----------------------------------------
+
+The next phase is Phase 8 (React Frontend Dashboard).
+
+
+29. Bug Fixes Applied (Post Phase 7 Audit)
+-------------------------------------------
+
+A full read of every source file was done. The following bugs were found and fixed:
+
+Bug 1: Import inside for loop (src/model_training.py)
+   sklearn.metrics imports were inside the hyperparameter tuning loop body.
+   Moved to top-level module imports.
+
+Bug 2: Hardcoded AUC of 0.90 (src/model_training.py)
+   log_model_metadata() was called with auc_score=0.90, a fake placeholder.
+   Fixed to auc_score=0.0. Real AUC is computed by evaluate_model() and stored
+   separately in reports/evaluation_report.json.
+
+Bug 3: Missing target column guard (src/data_preprocessing.py)
+   When is_train=True but the isFraud column is absent, the code silently set
+   y=None and crashed with a confusing TypeError inside train_test_split.
+   Fixed: now raises a clear ValueError with a descriptive message.
+
+Bug 4: NaN labels from inference batch concat (src/retraining_pipeline.py)
+   Inference batch rows have no isFraud labels. When concatenated with training
+   rows, those rows get isFraud=NaN, causing SMOTE to crash.
+   Fixed: added a dropna(subset=['isFraud']) step before preprocess_data().
+
+Bug 5: Evidently column mismatch (src/drift_detector.py)
+   The Evidently DataDriftPreset report used ref_card_col for both reference and
+   current data. If the inference batch had card_type but the baseline had card6
+   (or vice versa), this would raise a KeyError.
+   Fixed: each dataset now uses its own resolved column name, and the current
+   column is renamed to match the reference name before passing to Evidently.
+
+Bug 6: is_weekend type mismatch (src/api/main.py)
+   is_weekend was computed as int (0 or 1) but the ORM column is Boolean.
+   Fixed: now computed as bool explicitly.
+
+Bug 7: retrain.yml was a placeholder (.github/workflows/retrain.yml)
+   The scheduled GitHub Actions workflow only had an echo statement.
+   Fixed: now runs the full pipeline (install deps, generate batch, check drift).
+   DATABASE_URL and MLFLOW_TRACKING_URI are read from GitHub repository secrets.
+
+All 34 tests continue to pass after these fixes.
+flake8 and black --check also pass with zero errors.
+
+
+30. How to Verify the Pipeline is Working
+-------------------------------------------
+
+This section explains how to test the full pipeline end to end, step by step.
+Activate the .venv first:
+
+    .venv\Scripts\activate
+
+STEP 1: Run unit tests.
+    python -m pytest tests -v
+    Expected: 34 tests pass, all green.
+
+STEP 2: Run data ingestion smoke test (no files saved).
+    python -m src.data_ingestion
+    Expected: prints IngestionSummary for train and test splits.
+              Train fraud_rate should be about 0.035.
+
+STEP 3: Run feature engineering and preprocessing.
+    WARNING: 5-10 minutes on the full 590k row dataset.
+
+    python scripts/run_preprocessing.py
+    (or run manually via python -c as a one-liner)
+    Saves: data/processed/ CSVs and models/ transformer files.
+
+STEP 4: Train the model.
+    python scripts/train.py
+    Expected: prints trial F1s and saves models/xgboost_model.joblib.
+    MLflow falls back to ./mlruns/ if Docker is not running.
+
+STEP 5: Evaluate the model.
+    python scripts/evaluate.py
+    Expected: prints metrics, saves reports/evaluation_report.json.
+
+STEP 6: Generate a drifted inference batch.
+    python scripts/generate_inference_batch.py
+    Expected: saves data/inference_batches/batch_YYYYMMDD.csv.
+
+STEP 7: Run drift detection.
+    python scripts/check_drift.py
+    Expected: prints KS and Chi-Square test results.
+              Triggers retraining automatically if any p-value < 0.05.
+
+STEP 8: Start FastAPI locally.
+    python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+    Then open: http://localhost:8000/docs
+    Health:    http://localhost:8000/health
+
+STEP 9: Start full Docker stack (requires Docker Desktop running).
+    docker compose up --build
+    Services:
+        PostgreSQL:  localhost:5432
+        MLflow UI:   http://localhost:5001
+        FastAPI API: http://localhost:8000
+        Grafana:     http://localhost:3001  (admin / admin)
+
+SHORTCUT: Use the Makefile.
+    make setup     Install dependencies
+    make up        Start full Docker stack
+    make train     Run training pipeline
+    make evaluate  Run evaluation
+    make drift     Generate batch and check drift
+    make retrain   Manually trigger retraining
+    make test      Run tests
+    make lint      Run lint checks
+    make api       Start FastAPI locally
+    make clean     Remove generated files and caches
