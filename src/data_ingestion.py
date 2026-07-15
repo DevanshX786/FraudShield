@@ -2,12 +2,48 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
 import yaml
+
+
+def reduce_mem_usage(df: pd.DataFrame) -> pd.DataFrame:
+    """Downcast numeric columns to reduce memory footprint by 50-70%."""
+    df = df.copy()
+    start_mem = df.memory_usage().sum() / 1024**2
+    for col in df.columns:
+        col_type = df[col].dtype
+        if pd.api.types.is_numeric_dtype(col_type):
+            c_min = df[col].min()
+            c_max = df[col].max()
+            if pd.api.types.is_integer_dtype(col_type):
+                if c_min > np.iinfo(np.int8).min and c_max < np.iinfo(np.int8).max:
+                    df[col] = df[col].astype(np.int8)
+                elif c_min > np.iinfo(np.int16).min and c_max < np.iinfo(np.int16).max:
+                    df[col] = df[col].astype(np.int16)
+                elif c_min > np.iinfo(np.int32).min and c_max < np.iinfo(np.int32).max:
+                    df[col] = df[col].astype(np.int32)
+                elif c_min > np.iinfo(np.int64).min and c_max < np.iinfo(np.int64).max:
+                    df[col] = df[col].astype(np.int64)
+            else:
+                if (
+                    c_min > np.finfo(np.float32).min
+                    and c_max < np.finfo(np.float32).max
+                ):
+                    df[col] = df[col].astype(np.float32)
+                else:
+                    df[col] = df[col].astype(np.float64)
+    end_mem = df.memory_usage().sum() / 1024**2
+    print(
+        f"Memory usage decreased to {end_mem:.2f} MB (decreased by {(start_mem - end_mem) / start_mem * 100:.1f}%)"
+    )
+    return df
+
 
 DatasetSplit = Literal["train", "test"]
 
@@ -64,8 +100,33 @@ def load_ieee_cis_dataset(
         data_config=data_config,
     )
 
-    transactions = pd.read_csv(transaction_path)
-    identity = pd.read_csv(identity_path) if identity_path.exists() else pd.DataFrame()
+    # Support downsampling for training split
+    max_rows = None
+    if split == "train":
+        max_rows = data_config.get("max_training_rows")
+        env_max = os.getenv("MAX_TRAINING_ROWS")
+        if env_max is not None:
+            try:
+                max_rows = int(env_max)
+            except ValueError:
+                pass
+
+    if max_rows is not None:
+        print(
+            f"Loading raw transaction dataset split '{split}' with limit of {max_rows} rows..."
+        )
+        transactions = pd.read_csv(transaction_path, nrows=max_rows)
+    else:
+        print(f"Loading raw transaction dataset split '{split}'...")
+        transactions = pd.read_csv(transaction_path)
+
+    transactions = reduce_mem_usage(transactions)
+
+    if identity_path.exists():
+        identity = pd.read_csv(identity_path)
+        identity = reduce_mem_usage(identity)
+    else:
+        identity = pd.DataFrame()
 
     required_columns_key = f"required_{split}_transaction_columns"
     required_columns = data_config[required_columns_key]

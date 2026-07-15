@@ -319,6 +319,7 @@ def reset_drift_intensity(config_path: str | Path) -> None:
 def retrain_pipeline(
     config_path: str | Path = "config/config.yaml",
     database_url: str | None = None,
+    force: bool = False,
 ) -> None:
     """Execute automated retraining workflow, validate, and promote."""
     start_time = datetime.now()
@@ -337,29 +338,32 @@ def retrain_pipeline(
 
     try:
         # 2. Check Rate Limits
-        print("Checking retraining rate limits...")
-        min_hours = float(retrain_config["min_hours_between_retrains"])
-        max_per_day = int(retrain_config["max_retrains_per_day"])
+        if not force:
+            print("Checking retraining rate limits...")
+            min_hours = float(retrain_config["min_hours_between_retrains"])
+            max_per_day = int(retrain_config["max_retrains_per_day"])
 
-        allowed, reason = check_rate_limits(
-            database_url=database_url,
-            history_file_path=history_file_path,
-            min_hours=min_hours,
-            max_per_day=max_per_day,
-        )
-        if not allowed:
-            print(f"Retraining rate limit hit: {reason}", file=sys.stderr)
-            # Log failure event
-            log_retrain_history(
-                triggered_at=start_time,
-                trigger_reason="drift_detection",
-                old_f1=0.0,
-                new_f1=0.0,
-                promoted=False,
-                notes=f"Rate limit check failed: {reason}",
+            allowed, reason = check_rate_limits(
                 database_url=database_url,
+                history_file_path=history_file_path,
+                min_hours=min_hours,
+                max_per_day=max_per_day,
             )
-            return
+            if not allowed:
+                print(f"Retraining rate limit hit: {reason}", file=sys.stderr)
+                # Log failure event
+                log_retrain_history(
+                    triggered_at=start_time,
+                    trigger_reason="drift_detection",
+                    old_f1=0.0,
+                    new_f1=0.0,
+                    promoted=False,
+                    notes=f"Rate limit check failed: {reason}",
+                    database_url=database_url,
+                )
+                return
+        else:
+            print("Bypassing rate limits (force=True)...")
 
         # 3. Load baseline and inference batch files
         print("Loading raw training baseline data...")
@@ -505,4 +509,13 @@ def retrain_pipeline(
 
 
 if __name__ == "__main__":
-    retrain_pipeline()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run model retraining pipeline.")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force retraining by bypassing rate limits.",
+    )
+    args = parser.parse_args()
+    retrain_pipeline(force=args.force)

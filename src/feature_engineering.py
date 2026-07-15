@@ -142,8 +142,8 @@ def engineer_features(
     config = config or load_config(config_path)
     feat_config = config["features"]
 
-    # Ensure dataset is sorted by TransactionDT for point-in-time safety
-    df = df.sort_values("TransactionDT").copy()
+    # Ensure dataset is sorted by TransactionDT for point-in-time safety and reset index to prevent out-of-bounds errors on sampled data
+    df = df.sort_values("TransactionDT").reset_index(drop=True)
 
     # 1. Temporal Features
     df["day_number"] = (df["TransactionDT"] // 86400).astype(int)

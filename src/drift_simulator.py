@@ -100,3 +100,63 @@ def simulate_drift(
             df[metric] = df[metric] * (1.0 + 1.5 * drift_intensity)
 
     return df
+
+
+def generate_drifted_batch(
+    drift_intensity: float,
+    config_path: str | Path = "config/config.yaml",
+) -> Path:
+    """Generate a drifted batch file on disk matching scripts/generate_inference_batch.py logic."""
+    from datetime import datetime
+    from src.data_ingestion import load_ieee_cis_dataset
+    from src.feature_engineering import engineer_features
+
+    config = load_config(config_path)
+    paths_config = config["paths"]
+
+    # Create inference batches directory if it doesn't exist
+    batch_dir = Path(paths_config["inference_batch_dir"])
+    batch_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load raw training dataset split as base
+    df_raw, _ = load_ieee_cis_dataset("train", config_path=config_path)
+
+    # Sort by TransactionDT to ensure temporal correctness
+    df_raw = df_raw.sort_values("TransactionDT").reset_index(drop=True)
+
+    # We take the last 5000 rows to simulate the most recent transaction batch
+    n_inference = min(5000, len(df_raw))
+
+    # Set markers
+    df_raw["is_inference_batch"] = False
+    df_raw.iloc[-n_inference:, df_raw.columns.get_loc("is_inference_batch")] = True
+
+    # Separate baseline and candidate batch
+    baseline_df = df_raw[~df_raw["is_inference_batch"]].copy()
+    candidate_df = df_raw[df_raw["is_inference_batch"]].copy()
+
+    # Apply drift only to the candidate inference batch raw columns
+    drifted_candidate_df = simulate_drift(
+        candidate_df, drift_intensity=drift_intensity, config_path=config_path
+    )
+
+    # Combine back to correctly compute rolling aggregates (O(N) rolling window)
+    combined_df = pd.concat(
+        [baseline_df, drifted_candidate_df], axis=0, ignore_index=True
+    )
+    combined_df = combined_df.sort_values("TransactionDT").reset_index(drop=True)
+
+    # Engineer features on the combined dataset
+    engineered_df = engineer_features(combined_df, config_path=config_path)
+
+    # Extract the drifted engineered inference batch rows
+    inference_batch = engineered_df[engineered_df["is_inference_batch"]].copy()
+    inference_batch = inference_batch.drop(columns=["is_inference_batch"])
+
+    # Format filename: batch_YYYYMMDD.csv
+    date_str = datetime.now().strftime("%Y%m%d")
+    out_file = batch_dir / f"batch_{date_str}.csv"
+
+    # Save to disk
+    inference_batch.to_csv(out_file, index=False)
+    return out_file

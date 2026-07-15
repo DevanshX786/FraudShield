@@ -1,0 +1,93 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 248, 250, 252; /* slate-50 */
+    --foreground: 15, 23, 42;    /* slate-900 */
+    
+    --card: 255, 255, 255;
+    --card-foreground: 15, 23, 42;
+    
+    --popover: 255, 255, 255;
+    --popover-foreground: 15, 23, 42;
+    
+    --primary: 79, 70, 229;       /* indigo-600 */
+    --primary-foreground: 255, 255, 255;
+    
+    --secondary: 241, 245, 249;   /* slate-100 */
+    --secondary-foreground: 15, 23, 42;
+    
+    --muted: 241, 245, 249;       /* slate-100 */
+    --muted-foreground: 100, 116, 139; /* slate-500 */
+    
+    --accent: 241, 245, 249;      /* slate-100 */
+    --accent-foreground: 15, 23, 42;
+    
+    --destructive: 239, 68, 68;   /* red-500 */
+    --destructive-foreground: 255, 255, 255;
+    
+    --border: 226, 232, 240;      /* slate-200 */
+    --input: 226, 232, 240;
+    --ring: 79, 70, 229;
+    
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 11, 15, 26;     /* deep slate-950 */
+    --foreground: 248, 250, 252;  /* slate-50 */
+    
+    --card: 17, 24, 39;           /* slate-900 */
+    --card-foreground: 248, 250, 252;
+    
+    --popover: 17, 24, 39;
+    --popover-foreground: 248, 250, 252;
+    
+    --primary: 99, 102, 241;      /* indigo-500 */
+    --primary-foreground: 255, 255, 255;
+    
+    --secondary: 31, 41, 55;      /* slate-800 */
+    --secondary-foreground: 248, 250, 252;
+    
+    --muted: 31, 41, 55;
+    --muted-foreground: 156, 163, 175; /* gray-400 */
+    
+    --accent: 31, 41, 55;
+    --accent-foreground: 248, 250, 252;
+    
+    --destructive: 239, 68, 68;
+    --destructive-foreground: 255, 255, 255;
+    
+    --border: 31, 41, 55;         /* slate-800 */
+    --input: 31, 41, 55;
+    --ring: 99, 102, 241;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+/* Custom scrollbars for nice styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(var(--border), 0.5);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--border), 0.8);
+}

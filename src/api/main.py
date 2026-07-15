@@ -27,6 +27,10 @@ from src.api.models import (
 )
 from src.data_preprocessing import preprocess_data
 from src.retraining_pipeline import retrain_pipeline
+import random
+from src.api.demo_engine import DemoScenarioEngine
+
+DEMO_ENGINE = DemoScenarioEngine()
 
 # Load configuration
 CONFIG_PATH = "config/config.yaml"
@@ -48,6 +52,9 @@ EXPLAINER = None
 def load_production_model() -> None:
     """Load production model from MLflow registry or local fallback."""
     global MODEL, MODEL_SOURCE, MODEL_VERSION, EXPLAINER
+    if MODEL_SOURCE == "mock_source":
+        return
+    MODEL = None
     # Configure MLflow tracking
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
     mlflow.set_tracking_uri(tracking_uri)
@@ -84,9 +91,31 @@ def load_production_model() -> None:
             if local_model_path.exists():
                 MODEL = joblib.load(local_model_path)
                 MODEL_SOURCE = "local_fallback"
-                MODEL_VERSION = "local_v1"
+
+                # Check JSON metadata for version
+                local_version = "local_v1"
+                try:
+                    metadata_path = Path("models/model_registry_metadata.json")
+                    if metadata_path.exists():
+                        with open(metadata_path, "r", encoding="utf-8") as f:
+                            records = json.load(f)
+                            prod_records = [
+                                r for r in records if r.get("is_production") is True
+                            ]
+                            if prod_records:
+                                local_version = (
+                                    f"v{prod_records[-1].get('model_version')}"
+                                )
+                except Exception as meta_err:
+                    print(f"Warning: Failed to parse local model version: {meta_err}")
+
+                if DEMO_ENGINE.is_active:
+                    # In demo mode, MODEL_VERSION is managed by demo stage transitions
+                    pass
+                else:
+                    MODEL_VERSION = local_version
                 print(
-                    f"Loaded production model from local file: " f"{local_model_path}"
+                    f"Loaded production model from local file: {local_model_path} (version: {MODEL_VERSION})"
                 )
             else:
                 print(
@@ -309,6 +338,40 @@ def predict(
     payload: TransactionPayload, db: Session = Depends(get_db)
 ) -> dict[str, Any]:
     """Calculate fraud probability and SHAP values for an incoming transaction."""
+    if DEMO_ENGINE.is_active:
+        prob = 0.02 + random.random() * 0.1
+        if DEMO_ENGINE.stage == 2:
+            factor = (DEMO_ENGINE.stage_seconds - 10) / 20.0
+            prob = prob * (1.0 - factor) + (0.4 + random.random() * 0.55) * factor
+        elif DEMO_ENGINE.stage in (3, 4):
+            prob = 0.4 + random.random() * 0.55
+
+        if prob >= 0.5:
+            prediction = "FRAUD"
+            confidence = "HIGH" if prob >= 0.70 else "MEDIUM"
+            shap_explanation = {"amount": 0.35, "velocity_1hr": 0.25}
+        elif prob >= 0.3:
+            prediction = "SUSPICIOUS"
+            confidence = "MEDIUM"
+            shap_explanation = {"amount": 0.18, "velocity_1hr": 0.12}
+        else:
+            prediction = "CLEAN"
+            confidence = "HIGH" if prob < 0.15 else "MEDIUM"
+            shap_explanation = {"amount": -0.05, "velocity_1hr": -0.02}
+
+        card_net = payload.card4 or "visa"
+        card_typ = payload.card6 or "debit"
+        return {
+            "transaction_id": payload.transaction_id,
+            "fraud_probability": float(prob),
+            "prediction": prediction,
+            "confidence": confidence,
+            "model_version": MODEL_VERSION,
+            "shap_explanation": shap_explanation,
+            "amount": payload.transaction_amt,
+            "card_type": f"{card_typ} ({card_net})",
+        }
+
     if MODEL is None:
         raise HTTPException(
             status_code=503,
@@ -477,6 +540,8 @@ def predict(
         except Exception as shap_ex:
             print(f"Warning: SHAP explanation generation failed: {shap_ex}")
 
+    card_net = payload.card4 or "visa"
+    card_typ = payload.card6 or "debit"
     response_dict = {
         "transaction_id": payload.transaction_id,
         "fraud_probability": prob,
@@ -484,6 +549,8 @@ def predict(
         "confidence": confidence,
         "model_version": MODEL_VERSION,
         "shap_explanation": shap_explanation,
+        "amount": payload.transaction_amt,
+        "card_type": f"{card_typ} ({card_net})",
     }
 
     # 6. Save prediction metadata log
@@ -495,6 +562,14 @@ def predict(
 @app.get("/metrics")
 def get_metrics(db: Session = Depends(get_db)) -> dict[str, Any]:
     """Retrieve production model classification evaluation metrics."""
+    if DEMO_ENGINE.is_active:
+        return {
+            "f1_score": DEMO_ENGINE.accuracy / 100.0,
+            "auc_score": DEMO_ENGINE.confidence / 100.0,
+            "precision_score": DEMO_ENGINE.fraud_detection_rate / 100.0,
+            "recall_score": (DEMO_ENGINE.accuracy - 2.0) / 100.0,
+        }
+
     # 1. Try DB
     if db is not None:
         try:
@@ -513,6 +588,23 @@ def get_metrics(db: Session = Depends(get_db)) -> dict[str, Any]:
                     "precision_score": float(row[2]),
                     "recall_score": float(row[3]),
                 }
+        except Exception:
+            pass
+
+    # 2. Try Evaluation Report for real test metrics (ROC-AUC, etc.)
+    report_file = Path("reports/evaluation_report.json")
+    if report_file.exists() and MODEL_SOURCE != "mock_source":
+        try:
+            with open(report_file, "r", encoding="utf-8") as f:
+                report = json.load(f)
+                metrics_data = report.get("metrics", {})
+                if metrics_data:
+                    return {
+                        "f1_score": float(metrics_data["f1_score"]),
+                        "auc_score": float(metrics_data["roc_auc_score"]),
+                        "precision_score": float(metrics_data["precision_score"]),
+                        "recall_score": float(metrics_data["recall_score"]),
+                    }
         except Exception:
             pass
 
@@ -545,6 +637,34 @@ def get_metrics(db: Session = Depends(get_db)) -> dict[str, Any]:
 @app.get("/drift")
 def get_drift(db: Session = Depends(get_db)) -> dict[str, Any]:
     """Retrieve the latest statistical data drift metrics summary."""
+    if DEMO_ENGINE.is_active:
+        from datetime import date
+
+        return {
+            "run_date": date.today().isoformat(),
+            "drift_detected": DEMO_ENGINE.status == "drift_detected",
+            "features": [
+                {
+                    "name": "amount",
+                    "drift_score": DEMO_ENGINE.drift_score,
+                    "p_value": 0.0001 if DEMO_ENGINE.drift_score > 0.05 else 0.8,
+                    "drift_detected": DEMO_ENGINE.drift_score > 0.05,
+                },
+                {
+                    "name": "velocity_1hr",
+                    "drift_score": DEMO_ENGINE.drift_score * 0.9,
+                    "p_value": 0.0001 if DEMO_ENGINE.drift_score > 0.05 else 0.8,
+                    "drift_detected": DEMO_ENGINE.drift_score > 0.05,
+                },
+                {
+                    "name": "user_avg_amount_30d",
+                    "drift_score": DEMO_ENGINE.drift_score * 0.8,
+                    "p_value": 0.0001 if DEMO_ENGINE.drift_score > 0.05 else 0.8,
+                    "drift_detected": DEMO_ENGINE.drift_score > 0.05,
+                },
+            ],
+        }
+
     # 1. Try DB
     if db is not None:
         try:
@@ -606,6 +726,9 @@ def get_drift(db: Session = Depends(get_db)) -> dict[str, Any]:
 @app.get("/drift/history")
 def get_drift_history(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     """Retrieve historical statistical drift runs."""
+    if DEMO_ENGINE.is_active:
+        return DEMO_ENGINE.drift_history
+
     history = []
     # 1. Try DB
     if db is not None:
@@ -643,18 +766,33 @@ def get_drift_history(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     return history
 
 
+def retrain_and_deploy() -> None:
+    """Run retraining pipeline and deploy the newly retrained model."""
+    try:
+        retrain_pipeline(force=True)
+        load_production_model()
+    except Exception as e:
+        print(f"Error during retrain_and_deploy: {e}")
+
+
 @app.post("/retrain")
 def trigger_manual_retrain(background_tasks: BackgroundTasks) -> dict[str, str]:
     """Manually trigger model retraining in an asynchronous background thread."""
-    background_tasks.add_task(retrain_pipeline)
+    background_tasks.add_task(retrain_and_deploy)
     return {"status": "retraining started"}
 
 
 @app.get("/model/info")
 def get_model_info(db: Session = Depends(get_db)) -> dict[str, Any]:
     """Retrieve metadata information and promotion logs for the active model."""
-    promotion_history = []
+    if DEMO_ENGINE.is_active:
+        return {
+            "model_version": MODEL_VERSION,
+            "model_source": "demo_registry",
+            "promotion_history": DEMO_ENGINE.promotion_history,
+        }
 
+    promotion_history = []
     # 1. Try DB
     if db is not None:
         try:
@@ -709,18 +847,33 @@ def get_model_info(db: Session = Depends(get_db)) -> dict[str, Any]:
 @app.get("/transactions/recent")
 def get_recent_transactions(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     """Retrieve the last 100 logged prediction results."""
-    recent = []
+    if DEMO_ENGINE.is_active:
+        return DEMO_ENGINE.recent_transactions
 
+    recent = []
     # 1. Try DB
     if db is not None:
         try:
             res = (
-                db.query(PredictionRecord)
+                db.query(
+                    PredictionRecord,
+                    FeatureRecord.amount,
+                    FeatureRecord.card_type,
+                    FeatureRecord.card_network,
+                )
+                .outerjoin(
+                    FeatureRecord,
+                    PredictionRecord.transaction_id == FeatureRecord.transaction_id,
+                )
                 .order_by(PredictionRecord.id.desc())
                 .limit(100)
                 .all()
             )
-            for r in res:
+            for r, amount, card_type, card_network in res:
+                c_type_display = card_type or "debit"
+                if card_network and card_network != "unknown":
+                    c_type_display = f"{c_type_display} ({card_network})"
+
                 recent.append(
                     {
                         "transaction_id": r.transaction_id,
@@ -729,11 +882,13 @@ def get_recent_transactions(db: Session = Depends(get_db)) -> list[dict[str, Any
                         "model_version": r.model_version,
                         "shap_explanation": r.shap_values,
                         "timestamp": r.timestamp.isoformat(),
+                        "amount": amount if amount is not None else 0.0,
+                        "card_type": c_type_display,
                     }
                 )
             return recent
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Warning: Failed to fetch joined transactions from DB: {e}")
 
     # 2. Fallback JSON
     predictions_file = Path("logs/predictions.json")
@@ -744,6 +899,43 @@ def get_recent_transactions(db: Session = Depends(get_db)) -> list[dict[str, Any
                 recent = all_preds[-100:]
                 # Reverse to match descending order
                 recent.reverse()
+
+            # Perform in-memory join with features.json if it exists
+            features_file = Path("logs/features.json")
+            features_map = {}
+            if features_file.exists():
+                try:
+                    with open(features_file, "r", encoding="utf-8") as f:
+                        all_features = json.load(f)
+                        for feat in all_features:
+                            tx_id = feat.get("transaction_id") or feat.get(
+                                "TransactionID"
+                            )
+                            if tx_id:
+                                features_map[tx_id] = feat
+                except Exception as feat_err:
+                    print(
+                        f"Warning: Failed to load features fallback for recent transactions: {feat_err}"
+                    )
+
+            for pred in recent:
+                tx_id = pred.get("transaction_id")
+                feat = features_map.get(tx_id) if tx_id else None
+                if feat:
+                    amount = feat.get("amount")
+                    pred["amount"] = amount if amount is not None else 0.0
+
+                    card_type = feat.get("card_type") or "debit"
+                    card_network = feat.get("card_network")
+                    if card_network and card_network != "unknown":
+                        pred["card_type"] = f"{card_type} ({card_network})"
+                    else:
+                        pred["card_type"] = card_type
+                else:
+                    if "amount" not in pred:
+                        pred["amount"] = 0.0
+                    if "card_type" not in pred:
+                        pred["card_type"] = "debit"
         except Exception:
             pass
 
@@ -790,6 +982,14 @@ def get_grafana_metrics(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
 @app.get("/health")
 def health() -> dict[str, str]:
     """Check API server, database connectivity, and production model health."""
+    if DEMO_ENGINE.is_active:
+        return {
+            "status": "ok" if DEMO_ENGINE.status == "healthy" else "degraded",
+            "database": "connected",
+            "model": "loaded",
+            "model_source": "demo_registry",
+        }
+
     db_status = "connected" if check_db_health() else "offline"
     model_status = "loaded" if MODEL is not None else "missing"
 
@@ -799,3 +999,100 @@ def health() -> dict[str, str]:
         "model": model_status,
         "model_source": MODEL_SOURCE,
     }
+
+
+@app.post("/demo/start")
+def start_demo() -> dict[str, str]:
+    """Start the MLOps Demo Scenario."""
+    DEMO_ENGINE.start()
+    return {"status": "started"}
+
+
+@app.post("/demo/stop")
+def stop_demo() -> dict[str, str]:
+    """Stop the MLOps Demo Scenario."""
+    DEMO_ENGINE.stop()
+    return {"status": "stopped"}
+
+
+@app.get("/demo/status")
+def get_demo_status() -> dict[str, Any]:
+    """Get the current MLOps Demo Scenario status."""
+    return DEMO_ENGINE.get_status_dict()
+
+
+@app.post("/demo/stage")
+def set_demo_stage(stage: int) -> dict[str, str]:
+    """Set the current MLOps Demo Scenario stage manually (1-5)."""
+    if not (1 <= stage <= 5):
+        raise HTTPException(status_code=400, detail="Stage must be between 1 and 5")
+    DEMO_ENGINE.set_stage(stage)
+    return {"status": "success", "stage": str(stage)}
+
+
+@app.post("/demo/custom")
+def set_custom_demo_metrics(
+    drift_score: float | None = None,
+    accuracy: float | None = None,
+    confidence: float | None = None,
+    fraud_detection_rate: float | None = None,
+    status: str | None = None,
+) -> dict[str, str]:
+    """Manually override demo metrics with custom values and sync with config."""
+    if not DEMO_ENGINE.is_active:
+        DEMO_ENGINE.start()
+
+    if drift_score is not None:
+        DEMO_ENGINE.drift_score = drift_score
+
+        # Sync with config.yaml
+        try:
+            import yaml
+
+            with open("config/config.yaml", "r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f)
+            if "drift_simulation" in cfg:
+                cfg["drift_simulation"]["current_intensity"] = drift_score
+                with open("config/config.yaml", "w", encoding="utf-8") as f:
+                    yaml.dump(cfg, f)
+        except Exception as e:
+            print(f"Warning: Failed to sync drift intensity to config: {e}")
+
+        # Update status based on threshold (0.05)
+        if drift_score > 0.05:
+            DEMO_ENGINE.status = "drift_detected"
+            DEMO_ENGINE.add_event(f"Applied custom drift intensity: {drift_score:.2f}")
+            DEMO_ENGINE.add_event("ALERT: Concept drift detected in feature streams")
+
+            # Auto degrade metrics proportionally if not custom specified
+            if accuracy is None:
+                factor = (drift_score - 0.05) / 0.95
+                DEMO_ENGINE.accuracy = max(72.0, 96.0 - factor * 24.0)
+            if confidence is None:
+                factor = (drift_score - 0.05) / 0.95
+                DEMO_ENGINE.confidence = max(68.0, 98.0 - factor * 30.0)
+            if fraud_detection_rate is None:
+                factor = (drift_score - 0.05) / 0.95
+                DEMO_ENGINE.fraud_detection_rate = max(76.0, 94.0 - factor * 18.0)
+        else:
+            DEMO_ENGINE.status = "healthy"
+            DEMO_ENGINE.add_event(
+                f"Applied custom drift intensity: {drift_score:.2f} (Stable)"
+            )
+            if accuracy is None:
+                DEMO_ENGINE.accuracy = 96.0
+            if confidence is None:
+                DEMO_ENGINE.confidence = 98.0
+            if fraud_detection_rate is None:
+                DEMO_ENGINE.fraud_detection_rate = 94.0
+
+    if accuracy is not None:
+        DEMO_ENGINE.accuracy = accuracy
+    if confidence is not None:
+        DEMO_ENGINE.confidence = confidence
+    if fraud_detection_rate is not None:
+        DEMO_ENGINE.fraud_detection_rate = fraud_detection_rate
+    if status is not None:
+        DEMO_ENGINE.status = status
+
+    return {"status": "success"}

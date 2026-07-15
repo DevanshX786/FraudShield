@@ -189,3 +189,42 @@ def test_invalid_train_target_raises_error(tmp_path: Path) -> None:
 
     with pytest.raises(DataValidationError, match="isFraud must contain only 0 and 1"):
         load_ieee_cis_dataset("train", config=config)
+
+
+def test_reduce_mem_usage() -> None:
+    from src.data_ingestion import reduce_mem_usage
+    import numpy as np
+
+    df = pd.DataFrame(
+        {
+            "int_col": [1, 2, 3, 4],
+            "float_col": [1.0, 2.5, 3.1, 4.0],
+            "str_col": ["a", "b", "c", "d"],
+        }
+    )
+    # Cast explicitly to high precision
+    df["int_col"] = df["int_col"].astype(np.int64)
+    df["float_col"] = df["float_col"].astype(np.float64)
+
+    df_reduced = reduce_mem_usage(df)
+
+    assert df_reduced["int_col"].dtype == np.int8
+    assert df_reduced["float_col"].dtype == np.float32
+    assert list(df_reduced["str_col"]) == ["a", "b", "c", "d"]
+
+
+def test_load_ieee_cis_dataset_respects_max_training_rows(tmp_path: Path) -> None:
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    config = _base_config(raw_dir)
+    # Add max_training_rows to config
+    config["data"]["max_training_rows"] = 2
+
+    # Write 4 rows
+    _write_csv(raw_dir / "train_transaction.csv", _transaction_rows())
+
+    dataframe, summary = load_ieee_cis_dataset("train", config=config)
+
+    # Should only load 2 rows as specified by max_training_rows
+    assert len(dataframe) <= 2
+    assert summary.rows_after_join <= 2

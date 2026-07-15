@@ -563,3 +563,43 @@ def test_predict_endpoint_missing_model(client, monkeypatch) -> None:
     response = client.post("/predict", json=payload)
     assert response.status_code == 503
     assert "model is not loaded" in response.json()["detail"]
+
+
+def test_recent_transactions_offline_with_features(offline_client) -> None:
+    """Test fetching recent predictions log from file fallback with amount/card_type join."""
+    predictions_file = Path("logs/predictions.json")
+    features_file = Path("logs/features.json")
+
+    with open(predictions_file, "w", encoding="utf-8") as f:
+        json.dump(
+            [
+                {
+                    "transaction_id": "tx_with_feat",
+                    "fraud_probability": 0.05,
+                    "prediction": "CLEAN",
+                    "model_version": "mock_v1",
+                    "shap_explanation": {"feat_1": 0.01},
+                }
+            ],
+            f,
+        )
+    with open(features_file, "w", encoding="utf-8") as f:
+        json.dump(
+            [
+                {
+                    "transaction_id": "tx_with_feat",
+                    "amount": 250.50,
+                    "card_type": "credit",
+                    "card_network": "mastercard",
+                }
+            ],
+            f,
+        )
+
+    response = offline_client.get("/transactions/recent")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["transaction_id"] == "tx_with_feat"
+    assert data[0]["amount"] == 250.50
+    assert data[0]["card_type"] == "credit (mastercard)"

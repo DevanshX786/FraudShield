@@ -2,9 +2,9 @@ name: Retrain
 
 on:
   workflow_dispatch:
-  schedule:
-    # Runs daily at midnight UTC
-    - cron: "0 0 * * *"
+  # schedule:
+  #   # Runs daily at midnight UTC
+  #   - cron: "0 0 * * *"
 
 jobs:
   retrain:
@@ -29,8 +29,18 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
+      - name: Download IEEE-CIS dataset
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          pip install kaggle
+          kaggle competitions download -c ieee-fraud-detection
+          unzip -o ieee-fraud-detection.zip -d data/raw/
+
       - name: Generate drifted inference batch
         run: python scripts/generate_inference_batch.py
 
       - name: Run drift detection and conditional retraining
         run: python scripts/check_drift.py
+

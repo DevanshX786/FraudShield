@@ -17,13 +17,15 @@ services:
       retries: 5
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.17.2
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mlflow
     container_name: fraudshield-mlflow
     depends_on:
       postgres:
         condition: service_healthy
     ports:
-      - "5001:5000"
+      - "${MLFLOW_PORT:-5001}:5000"
     volumes:
       - ./models/mlflow:/mlflow/artifacts
     command:
@@ -75,6 +77,16 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_INSTALL_PLUGINS: "marcusolsson-json-datasource"
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dashboard
+    container_name: fraudshield-dashboard
+    depends_on:
+      - api
+    ports:
+      - "${DASHBOARD_PORT:-3000}:80"
 
 volumes:
   postgres_data:

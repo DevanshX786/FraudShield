@@ -1,108 +1,99 @@
-project:
-  name: fraudshield
-  random_state: 42
-
-paths:
-  raw_data_dir: data/raw
-  processed_data_dir: data/processed
-  inference_batch_dir: data/inference_batches
-  reports_dir: reports
-  logs_dir: logs
-  models_dir: models
-
+api:
+  fraud_threshold: 0.5
+  recent_transactions_limit: 100
+  suspicious_threshold: 0.3
 data:
-  train_transaction_file: train_transaction.csv
-  train_identity_file: train_identity.csv
-  test_transaction_file: test_transaction.csv
-  test_identity_file: test_identity.csv
-  target_column: isFraud
   join_key: TransactionID
-  required_train_transaction_columns:
-    - TransactionID
-    - isFraud
-    - TransactionDT
-    - TransactionAmt
-    - ProductCD
-    - card1
-    - card2
-    - card3
-    - card4
-    - card5
-    - card6
+  max_training_rows: 20000
   required_test_transaction_columns:
-    - TransactionID
-    - TransactionDT
-    - TransactionAmt
-    - ProductCD
-    - card1
-    - card2
-    - card3
-    - card4
-    - card5
-    - card6
-
-features:
-  user_key_columns:
-    - card1
-    - card2
-    - card3
-    - card5
-    - addr1
-  merchant_key_columns:
-    - ProductCD
-    - card4
-    - P_emaildomain
-  categorical_columns:
-    - ProductCD
-    - card4
-    - card6
-    - P_emaildomain
-    - R_emaildomain
-    - DeviceType
-  rolling_windows:
-    user_days: 30
-    merchant_days: 30
-    velocity_hours: 1
-
-split:
-  train_size: 0.70
-  validation_size: 0.15
-  test_size: 0.15
-  stratify: true
-  # SMOTE oversampling: 0.3 means minority grows to 30% of majority class.
-  # Full 1.0 (50/50) requires ~1.75 GB RAM on the full dataset.
-  # XGBoost scale_pos_weight already handles the remaining imbalance.
-  use_smote: true
-  smote_sampling_strategy: 0.3
-
-model:
-  name: fraudshield-xgboost
-  threshold_search:
-    min: 0.30
-    max: 0.70
-    step: 0.05
-  xgboost:
-    objective: binary:logistic
-    eval_metric: aucpr
-    max_depth: 6
-    learning_rate: 0.05
-    n_estimators: 300
-    subsample: 0.8
-    colsample_bytree: 0.8
-
+  - TransactionID
+  - TransactionDT
+  - TransactionAmt
+  - ProductCD
+  - card1
+  - card2
+  - card3
+  - card4
+  - card5
+  - card6
+  required_train_transaction_columns:
+  - TransactionID
+  - isFraud
+  - TransactionDT
+  - TransactionAmt
+  - ProductCD
+  - card1
+  - card2
+  - card3
+  - card4
+  - card5
+  - card6
+  target_column: isFraud
+  test_identity_file: test_identity.csv
+  test_transaction_file: test_transaction.csv
+  train_identity_file: train_identity.csv
+  train_transaction_file: train_transaction.csv
 drift_simulation:
   base_intensity: 0.1
   current_intensity: 0.1
+  drift_threshold: 0.05
   intensity_increment: 0.2
   max_intensity: 1.0
-  drift_threshold: 0.05
-
+features:
+  categorical_columns:
+  - ProductCD
+  - card4
+  - card6
+  - P_emaildomain
+  - R_emaildomain
+  - DeviceType
+  merchant_key_columns:
+  - ProductCD
+  - card4
+  - P_emaildomain
+  rolling_windows:
+    merchant_days: 30
+    user_days: 30
+    velocity_hours: 1
+  user_key_columns:
+  - card1
+  - card2
+  - card3
+  - card5
+  - addr1
+model:
+  name: fraudshield-xgboost
+  threshold_search:
+    max: 0.7
+    min: 0.3
+    step: 0.05
+  xgboost:
+    colsample_bytree: 0.8
+    eval_metric: aucpr
+    learning_rate: 0.05
+    max_depth: 6
+    n_estimators: 300
+    objective: binary:logistic
+    subsample: 0.8
+paths:
+  inference_batch_dir: data/inference_batches
+  logs_dir: logs
+  models_dir: models
+  processed_data_dir: data/processed
+  raw_data_dir: data/raw
+  reports_dir: reports
+project:
+  name: fraudshield
+  random_state: 42
 retraining:
-  min_hours_between_retrains: 6
   max_retrains_per_day: 3
+  min_hours_between_retrains: 6
   promotion_min_f1_delta: 0.01
-
-api:
-  fraud_threshold: 0.5
-  suspicious_threshold: 0.3
-  recent_transactions_limit: 100
+  tune_hyperparameters: false
+split:
+  smote_sampling_strategy: 0.3
+  stratify: true
+  test_size: 0.15
+  train_size: 0.7
+  use_smote: true
+  validation_size: 0.15

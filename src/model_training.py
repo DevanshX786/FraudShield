@@ -170,14 +170,8 @@ def train_model(
     # 2. Setup MLflow
     setup_mlflow(config)
 
-    # 3. Define tuning search space
-    # 3 options: default, shallow trees, higher learning rate
-    tuning_space = [
-        {"max_depth": 4, "learning_rate": 0.05, "n_estimators": 100, "subsample": 0.8},
-        # Default config
-        {"max_depth": 6, "learning_rate": 0.05, "n_estimators": 300, "subsample": 0.8},
-        {"max_depth": 6, "learning_rate": 0.1, "n_estimators": 200, "subsample": 1.0},
-    ]
+    # 3. Check if hyperparameter tuning is enabled
+    tune = config.get("retraining", {}).get("tune_hyperparameters", True)
 
     best_model = None
     best_f1 = -1.0
@@ -189,52 +183,119 @@ def train_model(
     # Enable autologging
     mlflow.xgboost.autolog(log_models=True)
 
-    print("Starting hyperparameter tuning...")
-    with mlflow.start_run(run_name="Hyperparameter_Tuning"):
-        for i, params in enumerate(tuning_space):
-            run_name = f"tuning_run_{i}"
-            with mlflow.start_run(run_name=run_name, nested=True) as child_run:
-                # Calculate scale_pos_weight dynamically to handle any class imbalances
-                pos_count = (y_train == 1).sum()
-                neg_count = (y_train == 0).sum()
-                scale_pos_weight = neg_count / pos_count if pos_count > 0 else 1.0
+    if tune:
+        # Define tuning search space
+        # 3 options: default, shallow trees, higher learning rate
+        tuning_space = [
+            {
+                "max_depth": 4,
+                "learning_rate": 0.05,
+                "n_estimators": 100,
+                "subsample": 0.8,
+            },
+            # Default config
+            {
+                "max_depth": 6,
+                "learning_rate": 0.05,
+                "n_estimators": 300,
+                "subsample": 0.8,
+            },
+            {
+                "max_depth": 6,
+                "learning_rate": 0.1,
+                "n_estimators": 200,
+                "subsample": 1.0,
+            },
+        ]
 
-                model = XGBClassifier(
-                    objective=model_config["xgboost"]["objective"],
-                    eval_metric=model_config["xgboost"]["eval_metric"],
-                    colsample_bytree=model_config["xgboost"]["colsample_bytree"],
-                    random_state=project_random_state,
-                    scale_pos_weight=scale_pos_weight,
-                    **params,
-                )
+        print("Starting hyperparameter tuning...")
+        with mlflow.start_run(run_name="Hyperparameter_Tuning"):
+            for i, params in enumerate(tuning_space):
+                run_name = f"tuning_run_{i}"
+                with mlflow.start_run(run_name=run_name, nested=True) as child_run:
+                    # Calculate scale_pos_weight dynamically to handle any class imbalances
+                    pos_count = (y_train == 1).sum()
+                    neg_count = (y_train == 0).sum()
+                    scale_pos_weight = neg_count / pos_count if pos_count > 0 else 1.0
 
-                model.fit(X_train, y_train)
+                    model = XGBClassifier(
+                        objective=model_config["xgboost"]["objective"],
+                        eval_metric=model_config["xgboost"]["eval_metric"],
+                        colsample_bytree=model_config["xgboost"]["colsample_bytree"],
+                        random_state=project_random_state,
+                        scale_pos_weight=scale_pos_weight,
+                        **params,
+                    )
 
-                # Evaluate on validation set with default 0.5 threshold
-                val_preds = model.predict(X_val)
-                # Calculate validation metrics manually to log
+                    model.fit(X_train, y_train)
 
-                val_f1 = float(f1_score(y_val, val_preds))
-                val_prec = float(precision_score(y_val, val_preds))
-                val_rec = float(recall_score(y_val, val_preds))
+                    # Evaluate on validation set with default 0.5 threshold
+                    val_preds = model.predict(X_val)
+                    # Calculate validation metrics manually to log
 
-                mlflow.log_metric("val_f1", val_f1)
-                mlflow.log_metric("val_precision", val_prec)
-                mlflow.log_metric("val_recall", val_rec)
+                    val_f1 = float(f1_score(y_val, val_preds))
+                    val_prec = float(precision_score(y_val, val_preds))
+                    val_rec = float(recall_score(y_val, val_preds))
 
-                print(f"Trial {i} {params} -> Val F1: {val_f1:.4f}")
+                    mlflow.log_metric("val_f1", val_f1)
+                    mlflow.log_metric("val_precision", val_prec)
+                    mlflow.log_metric("val_recall", val_rec)
 
-                if val_f1 > best_f1:
-                    best_f1 = val_f1
-                    best_prec = val_prec
-                    best_rec = val_rec
-                    best_model = model
-                    best_params = params
-                    best_run_id = child_run.info.run_id
+                    print(f"Trial {i} {params} -> Val F1: {val_f1:.4f}")
 
-        # Log best params to parent run
-        mlflow.log_params(best_params)
-        mlflow.log_metric("best_val_f1", best_f1)
+                    if val_f1 > best_f1:
+                        best_f1 = val_f1
+                        best_prec = val_prec
+                        best_rec = val_rec
+                        best_model = model
+                        best_params = params
+                        best_run_id = child_run.info.run_id
+
+            # Log best params to parent run
+            mlflow.log_params(best_params)
+            mlflow.log_metric("best_val_f1", best_f1)
+    else:
+        print(
+            "Hyperparameter tuning is disabled. Training single model with config params..."
+        )
+        params = {
+            "max_depth": model_config["xgboost"]["max_depth"],
+            "learning_rate": model_config["xgboost"]["learning_rate"],
+            "n_estimators": model_config["xgboost"]["n_estimators"],
+            "subsample": model_config["xgboost"]["subsample"],
+        }
+        with mlflow.start_run(run_name="Single_Model_Training") as run:
+            pos_count = (y_train == 1).sum()
+            neg_count = (y_train == 0).sum()
+            scale_pos_weight = neg_count / pos_count if pos_count > 0 else 1.0
+
+            model = XGBClassifier(
+                objective=model_config["xgboost"]["objective"],
+                eval_metric=model_config["xgboost"]["eval_metric"],
+                colsample_bytree=model_config["xgboost"]["colsample_bytree"],
+                random_state=project_random_state,
+                scale_pos_weight=scale_pos_weight,
+                **params,
+            )
+
+            model.fit(X_train, y_train)
+
+            val_preds = model.predict(X_val)
+            val_f1 = float(f1_score(y_val, val_preds))
+            val_prec = float(precision_score(y_val, val_preds))
+            val_rec = float(recall_score(y_val, val_preds))
+
+            mlflow.log_params(params)
+            mlflow.log_metric("val_f1", val_f1)
+            mlflow.log_metric("val_precision", val_prec)
+            mlflow.log_metric("val_recall", val_rec)
+
+            best_f1 = val_f1
+            best_prec = val_prec
+            best_rec = val_rec
+            best_model = model
+            best_params = params
+            best_run_id = run.info.run_id
 
     print(
         f"Hyperparameter tuning complete. Best Trial F1: {best_f1:.4f} "
